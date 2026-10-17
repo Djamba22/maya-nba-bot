@@ -136,21 +136,25 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 def run_telegram_bot():
-    """Funzione per avviare il bot Telegram in un thread separato"""
-    print("🤖 Starting Telegram bot...", flush=True)
-    
     if not TOKEN:
-        print(" ERRORE: TELEGRAM_BOT_TOKEN non configurato!", flush=True)
+        logger.error("❌ ERRORE: TELEGRAM_BOT_TOKEN non configurato!")
         return
     
-    bot_app = Application.builder().token(TOKEN).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(CommandHandler("analizza", handle_text))
-    bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("analizza", handle_text))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    print("✅ Bot handlers configurati, avvio polling...", flush=True)
-    bot_app.run_polling(allowed_updates=Update.ALL_TYPES)
+    logger.info("✅ Bot handlers configurati, avvio polling...")
+    
+    # Crea un event loop asyncio per questo thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(app.run_polling(allowed_updates=Update.ALL_TYPES))
+    finally:
+        loop.close()
 
 # Avvia il bot Telegram in un thread separato
 print(" Avvio thread Telegram bot...", flush=True)
