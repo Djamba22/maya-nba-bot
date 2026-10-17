@@ -129,9 +129,10 @@ async def run_bot_and_server():
     bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
-    # Avvia il bot in background
+    # Avvia il bot e il polling
     await bot_app.initialize()
     await bot_app.start()
+    await bot_app.updater.start_polling()
     
     # Avvia il server HTTP
     web_app = init_web_app()
@@ -143,8 +144,10 @@ async def run_bot_and_server():
     print(f"🤖 Bot MAYA in ascolto... Server HTTP su porta {PORT}")
     
     # Mantieni entrambi attivi
-    while True:
-        await asyncio.sleep(3600)
-
-if __name__ == '__main__':
-    asyncio.run(run_bot_and_server())
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    finally:
+        await bot_app.updater.stop()
+        await bot_app.stop()
+        await bot_app.shutdown()
