@@ -1,11 +1,12 @@
 import os
+import sys
 import logging
 import pytesseract
 import re
-import asyncio
+import threading
 from PIL import Image
 import io
-from aiohttp import web
+from flask import Flask, jsonify
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
 
@@ -13,9 +14,29 @@ from telegram.ext import Application, MessageHandler, filters, ContextTypes, Com
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Stampa subito per far capire a Render che siamo vivi
+print("🚀 MAYA Bot starting...", flush=True)
+print(f" PORT: {PORT}", flush=True)
+print(f"🔑 TOKEN presente: {'SÌ' if TOKEN else 'NO'}", flush=True)
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
+# Flask app per Render
+app = Flask(__name__)
+
+@app.route('/')
+def health():
+    return jsonify({"status": "MAYA Bot is running 🏀"}), 200
+
+@app.route('/health')
+def health_check():
+    return "OK", 200
+
+# Funzioni del bot
 def parse_betting_data(text):
     """Estrae Giocatore, Linea e Quota dal testo OCR"""
     player_match = re.search(r'([A-Z][a-z]+\s[A-Z][a-z]+)', text)
@@ -38,7 +59,7 @@ def generate_maya_report(player, line, odds):
         verdict = "🟢 BET" if ev > 0.05 else ("🟡 LEAN" if ev > 0 else "🔴 PASS")
         
         report = f"""
- *MAYA FRAMEWORK v5.1 - ANALISI COMPLETA*
+🧠 *MAYA FRAMEWORK v5.1 - ANALISI COMPLETA*
 
 👤 *Giocatore:* {player}
 📊 *Linea:* {line} | 💰 *Quota:* {odds}
@@ -72,7 +93,7 @@ def generate_maya_report(player, line, odds):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gestisce le foto inviate dall'utente"""
-    await update.message.reply_text(" Analisi in corso... Attendi 10 secondi.")
+    await update.message.reply_text("🔍 Analisi in corso... Attendi 10 secondi.")
     
     try:
         photo = await update.message.photo[-1].get_file()
@@ -103,4 +124,41 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❗ Formato: /analizza Nome Linea Quota")
     else:
-        await update
+        await update.message.reply_text("👋 Inviami uno screenshot o usa /analizza")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Messaggio di benvenuto"""
+    await update.message.reply_text(
+        "🏀 *Benvenuto nel MAYA Framework v5.1*\n\n"
+        "📸 Inviami uno screenshot delle quote\n"
+        "✍️ Oppure: /analizza Nome Linea Quota",
+        parse_mode='Markdown'
+    )
+
+def run_telegram_bot():
+    """Funzione per avviare il bot Telegram in un thread separato"""
+    print("🤖 Starting Telegram bot...", flush=True)
+    
+    if not TOKEN:
+        print(" ERRORE: TELEGRAM_BOT_TOKEN non configurato!", flush=True)
+        return
+    
+    bot_app = Application.builder().token(TOKEN).build()
+    bot_app.add_handler(CommandHandler("start", start))
+    bot_app.add_handler(CommandHandler("analizza", handle_text))
+    bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+    
+    print("✅ Bot handlers configurati, avvio polling...", flush=True)
+    bot_app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+# Avvia il bot Telegram in un thread separato
+print(" Avvio thread Telegram bot...", flush=True)
+bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
+bot_thread.start()
+
+print(f"🌐 Avvio server Flask su porta {PORT}...", flush=True)
+
+# Avvia Flask con gunicorn (production-ready)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=PORT, debug=False)
