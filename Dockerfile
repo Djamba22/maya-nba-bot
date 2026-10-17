@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Installa Tesseract OCR
+# Installa Tesseract e dipendenze di sistema
 RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-ita \
@@ -17,5 +17,5 @@ COPY . .
 
 EXPOSE 10000
 
-# IMPORTANTE: esegue direttamente python bot.py, NON gunicorn
+# FORZA l'esecuzione diretta di Python. Niente Gunicorn.
 CMD ["python", "bot.py"]
