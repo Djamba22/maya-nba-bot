@@ -20,7 +20,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==================== DATA AGGREGATOR (Multi-Source) ====================
+# ==================== DATA AGGREGATOR ====================
 
 class DataAggregator:
     def __init__(self, player_name):
@@ -37,7 +37,6 @@ class DataAggregator:
         return self.data
 
     async def fetch_telegram_news(self):
-        """Scraper dei canali Telegram NBA (versione web pubblica)"""
         channels = [
             "https://t.me/s/nbanews24italia",
             "https://t.me/s/InfoBasketNBA"
@@ -46,6 +45,7 @@ class DataAggregator:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         found_news = []
         
+        import aiohttp
         async with aiohttp.ClientSession() as session:
             for channel_url in channels:
                 try:
@@ -55,10 +55,8 @@ class DataAggregator:
                     soup = BeautifulSoup(html, 'html.parser')
                     messages = soup.find_all('div', class_='tgme_widget_message_text')
                     
-                    # Controlla gli ultimi 5 messaggi di ogni canale
                     for msg in messages[:5]:
                         text = msg.get_text(separator=' ', strip=True)
-                        # Cerca il nome o il cognome del giocatore nel messaggio
                         name_parts = self.player_name.lower().split()
                         if len(name_parts) >= 2:
                             if name_parts[0] in text.lower() or name_parts[-1] in text.lower():
@@ -71,13 +69,11 @@ class DataAggregator:
         logger.info(f"✅ Telegram news controllate per {self.player_name}")
 
     async def fetch_sofascore_mock(self):
-        """Simulazione dati Sofascore (integrare API reale in produzione)"""
         pass
 
 # ==================== MAYA ENGINE ====================
 
 def parse_betting_data(text):
-    """Estrae TUTTI i giocatori da una tabella OCR"""
     players = []
     lines = text.split('\n')
     for line in lines:
@@ -101,11 +97,10 @@ def calculate_maya_score(player_data, aggregator_data):
     stats = aggregator_data.get('sofascore', {})
     news = aggregator_data.get('telegram_news', [])
     
-    # Controllo infortuni/news negative dai canali Telegram
     news_penalty = 1.0
     for n in news:
         if any(word in n.lower() for word in ['out', 'dubbio', 'infortunio', 'riposo', 'rest', 'non giocherà']):
-            news_penalty = 0.4  # Penalizzazione forte se ci sono notizie negative
+            news_penalty = 0.4
             
     avg_ppg = stats.get('ppg', 20.0)
     prob_model = min(0.95, max(0.05, (avg_ppg / line) * news_penalty * 0.6))
@@ -116,9 +111,8 @@ def calculate_maya_score(player_data, aggregator_data):
     
     verdict = "🟢 BET" if ev > 0.05 else ("🟡 LEAN" if ev > 0 else "🔴 PASS")
     
-    # Sintesi news per il report
     if news:
-        news_summary = "⚠️ ATTN:\n• " + "\n• ".join(news[:2])
+        news_summary = "️ ATTN:\n• " + "\n• ".join(news[:2])
     else:
         news_summary = "✅ Nessuna notizia critica recente sui canali monitorati."
     
@@ -170,7 +164,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Invia screenshot di SINGOLA prop\n"
         "• Invia screenshot di TABELLA completa (multi-giocatore)\n"
         "• /analizza Nome Linea Quota\n\n"
-        "📰 *Fonti News:* @nbanews24italia + @InfoBasketNBA (real-time)",
+        " *Fonti News:* @nbanews24italia + @InfoBasketNBA (real-time)",
         parse_mode='Markdown'
     )
 
@@ -191,7 +185,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             analysis = calculate_maya_score(players[0], data)
             await update.message.reply_text(generate_maya_report(analysis), parse_mode='Markdown')
         else:
-            await update.message.reply_text(f"📊 Rilevate {len(players)} props. Analisi multi-source in corso...")
+            await update.message.reply_text(f" Rilevate {len(players)} props. Analisi multi-source in corso...")
             results = await analyze_multiple_players(players)
             
             top3_text = "🏆 *TOP 3 MAYA VALUE*\n\n"
@@ -220,19 +214,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❗ Formato: /analizza Nome Linea Quota")
     else:
-        await update.message.reply_text("👋 Invia screenshot o usa /analizza Nome Linea Quota")
+        await update.message.reply_text(" Invia screenshot o usa /analizza Nome Linea Quota")
 
 # ==================== SERVER HTTP & BOT ====================
 
 async def health_check(request):
-    return aiohttp.web.Response(text="MAYA Bot v5.1 Multi-Source is running 🏀")
+    return web.Response(text="MAYA Bot v5.1 Multi-Source is running 🏀")
 
 async def run_server():
-    app = aiohttp.web.Application()
+    app = web.Application()
     app.router.add_get('/', health_check)
-    runner = aiohttp.web.AppRunner(app)
+    runner = web.AppRunner(app)
     await runner.setup()
-    site = aiohttp.web.TCPSite(runner, '0.0.0.0', PORT)
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
     logger.info(f"🌐 Server HTTP attivo su porta {PORT}")
     while True:
