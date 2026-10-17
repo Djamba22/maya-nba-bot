@@ -6,6 +6,7 @@ import re
 from PIL import Image
 import io
 from aiohttp import web
+import aiohttp
 from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -37,6 +38,7 @@ class DataAggregator:
         return self.data
 
     async def fetch_telegram_news(self):
+        """Scraper canali Telegram con FILTRO INTELLIGENTE"""
         channels = [
             "https://t.me/s/nbanews24italia",
             "https://t.me/s/InfoBasketNBA"
@@ -45,7 +47,21 @@ class DataAggregator:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         found_news = []
         
-        import aiohttp
+        # Parole chiave che indicano notizie REALI su giocatori (non promo)
+        relevant_keywords = [
+            'out', 'dubbio', 'infortunio', 'riposo', 'rest', 'non giocherà',
+            'titolare', 'starter', 'probable', 'questionable', 'day-to-day',
+            'load management', 'minutes restriction', 'limitazione',
+            'starting lineup', 'quintetto', 'ufficiale', 'confirmed'
+        ]
+        
+        # Parole da ignorare (messaggi promozionali/spam)
+        spam_keywords = [
+            'fantabasket', 'lega', 'registrati', 'codice', 'dunk', 'promo',
+            'scaricare', 'app', 'vota', 'sondaggio', 'link', 'clicca',
+            'buona fortuna', 'vincitore', 'premio'
+        ]
+        
         async with aiohttp.ClientSession() as session:
             for channel_url in channels:
                 try:
@@ -55,13 +71,25 @@ class DataAggregator:
                     soup = BeautifulSoup(html, 'html.parser')
                     messages = soup.find_all('div', class_='tgme_widget_message_text')
                     
-                    for msg in messages[:5]:
+                    for msg in messages[:10]:  # Ultimi 10 messaggi
                         text = msg.get_text(separator=' ', strip=True)
+                        text_lower = text.lower()
+                        
+                        # Salta messaggi spam/promo
+                        if any(spam in text_lower for spam in spam_keywords):
+                            continue
+                        
+                        # Controlla se il giocatore è menzionato
                         name_parts = self.player_name.lower().split()
+                        player_mentioned = False
                         if len(name_parts) >= 2:
-                            if name_parts[0] in text.lower() or name_parts[-1] in text.lower():
-                                found_news.append(f"[{channel_url.split('/')[-1]}] {text}")
-                                
+                            if name_parts[0] in text_lower or name_parts[-1] in text_lower:
+                                player_mentioned = True
+                        
+                        # Se il giocatore è menzionato E il messaggio è rilevante
+                        if player_mentioned and any(kw in text_lower for kw in relevant_keywords):
+                            found_news.append(f"[{channel_url.split('/')[-1]}] {text[:150]}")
+                            
                 except Exception as e:
                     logger.error(f"❌ Errore scraping {channel_url}: {e}")
                     
@@ -71,22 +99,47 @@ class DataAggregator:
     async def fetch_sofascore_mock(self):
         pass
 
-# ==================== MAYA ENGINE ====================
+# ==================== MAYA ENGINE - OCR MIGLIORATO ====================
 
 def parse_betting_data(text):
+    """OCR migliorato per tabelle Bet365"""
     players = []
     lines = text.split('\n')
+    
     for line in lines:
-        player_match = re.search(r'([A-Z][a-z]+\s[A-Z][a-z]+)', line)
-        line_match = re.search(r'(\d+\.?\d*)', line)
-        odds_match = re.search(r'(\d+\.\d{2})', line)
+        line = line.strip()
+        if not line:
+            continue
         
-        if player_match and line_match and odds_match:
+        # Pattern 1: Nome + numeri (formato classico Bet365)
+        # Esempio: "Jayson Tatum 1.18 1.58"
+        match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+.*?(\d+\.?\d*)\s+(\d+\.\d{2})', line)
+        if match:
             players.append({
-                'name': player_match.group(0),
-                'line': line_match.group(0),
-                'odds': odds_match.group(0)
+                'name': match.group(1),
+                'line': match.group(2),
+                'odds': match.group(3)
             })
+            continue
+        
+        # Pattern 2: Nome su riga separata, numeri sulla stessa riga
+        name_match = re.search(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)$', line)
+        if name_match:
+            # Cerca i numeri nelle righe successive
+            pass
+        
+        # Pattern 3: Fallback - qualsiasi nome proprio seguito da numeri
+        name_match = re.search(r'([A-Z][a-z]+ [A-Z][a-z]+)', line)
+        odds_match = re.search(r'(\d+\.\d{2})', line)
+        line_match = re.search(r'(\d+\.?\d*)', line)
+        
+        if name_match and odds_match and line_match:
+            players.append({
+                'name': name_match.group(1),
+                'line': line_match.group(1),
+                'odds': odds_match.group(1)
+            })
+    
     return players if players else [{'name': "Non riconosciuto", 'line': "N/A", 'odds': "N/A"}]
 
 def calculate_maya_score(player_data, aggregator_data):
@@ -109,10 +162,10 @@ def calculate_maya_score(player_data, aggregator_data):
     ev = (prob_model * (odds - 1)) - (1 - prob_model) if odds > 0 else -1
     mvi = min(100, max(0, (ev * 100) + 50 + (prob_model * 20)))
     
-    verdict = "🟢 BET" if ev > 0.05 else ("🟡 LEAN" if ev > 0 else "🔴 PASS")
+    verdict = "🟢 BET" if ev > 0.05 else (" LEAN" if ev > 0 else " PASS")
     
     if news:
-        news_summary = "️ ATTN:\n• " + "\n• ".join(news[:2])
+        news_summary = "⚠️ ATTN:\n• " + "\n• ".join(news[:2])
     else:
         news_summary = "✅ Nessuna notizia critica recente sui canali monitorati."
     
@@ -125,7 +178,7 @@ def calculate_maya_score(player_data, aggregator_data):
 
 def generate_maya_report(analysis):
     return f"""
-🧠 *MAYA FRAMEWORK v5.1 - Multi-Source*
+🧠 *MAYA FRAMEWORK v5.2*
 
 👤 *Giocatore:* {analysis['name']}
 📊 *Linea:* {analysis['line']} | 💰 *Quota:* {analysis['odds']}
@@ -159,17 +212,18 @@ async def analyze_multiple_players(players_data):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🏀 *MAYA Framework v5.1 - Multi-Source Edition*\n\n"
+        "🏀 *MAYA Framework v5.2 - Multi-Source*\n\n"
         "📸 *Funzionalità:*\n"
         "• Invia screenshot di SINGOLA prop\n"
-        "• Invia screenshot di TABELLA completa (multi-giocatore)\n"
+        "• Invia screenshot di TABELLA completa\n"
         "• /analizza Nome Linea Quota\n\n"
-        " *Fonti News:* @nbanews24italia + @InfoBasketNBA (real-time)",
+        " *Fonti:* @nbanews24italia + @InfoBasketNBA\n"
+        "⚠️ *Filtro anti-spam attivo*",
         parse_mode='Markdown'
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Analisi screenshot in corso... Attendi 15 secondi.")
+    await update.message.reply_text(" Analisi screenshot in corso... Attendi 15 secondi.")
     try:
         photo = await update.message.photo[-1].get_file()
         photo_bytes = await photo.download_as_bytearray()
@@ -179,13 +233,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         players = parse_betting_data(text)
         
         if len(players) == 1:
-            await update.message.reply_text(f"📊 Rilevata 1 prop: {players[0]['name']}")
+            await update.message.reply_text(f" Rilevata 1 prop: {players[0]['name']}")
             aggregator = DataAggregator(players[0]['name'])
             data = await aggregator.fetch_all_data()
             analysis = calculate_maya_score(players[0], data)
             await update.message.reply_text(generate_maya_report(analysis), parse_mode='Markdown')
         else:
-            await update.message.reply_text(f" Rilevate {len(players)} props. Analisi multi-source in corso...")
+            await update.message.reply_text(f"📊 Rilevate {len(players)} props. Analisi in corso...")
             results = await analyze_multiple_players(players)
             
             top3_text = "🏆 *TOP 3 MAYA VALUE*\n\n"
@@ -196,9 +250,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(top3_text, parse_mode='Markdown')
             
             if results:
-                await update.message.reply_text(f"🎯 *MIGLIORE PROP CONSIGLIATA:*\n\n" + generate_maya_report(results[0]), parse_mode='Markdown')
+                await update.message.reply_text(f" *MIGLIORE PROP:*\n\n" + generate_maya_report(results[0]), parse_mode='Markdown')
     except Exception as e:
-        await update.message.reply_text(f"❌ Errore analisi: {str(e)}")
+        await update.message.reply_text(f"❌ Errore: {str(e)}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -219,7 +273,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== SERVER HTTP & BOT ====================
 
 async def health_check(request):
-    return web.Response(text="MAYA Bot v5.1 Multi-Source is running 🏀")
+    return web.Response(text="MAYA Bot v5.2 is running 🏀")
 
 async def run_server():
     app = web.Application()
@@ -247,15 +301,15 @@ async def run_bot():
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    logger.info("🤖 Bot Telegram attivo con polling")
+    logger.info("🤖 Bot Telegram attivo")
     
     while True:
         await asyncio.sleep(3600)
 
 async def main():
-    logger.info("🚀 Avvio MAYA Bot v5.1 Multi-Source...")
-    logger.info(f"🔑 TOKEN: {'OK' if TOKEN else 'MANCANTE'}")
-    logger.info(f"📡 PORT: {PORT}")
+    logger.info("🚀 Avvio MAYA Bot v5.2...")
+    logger.info(f" TOKEN: {'OK' if TOKEN else 'MANCANTE'}")
+    logger.info(f" PORT: {PORT}")
     await asyncio.gather(run_bot(), run_server())
 
 if __name__ == '__main__':
