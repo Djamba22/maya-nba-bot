@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 # ==================== LOGICA MAYA ====================
 
 def parse_betting_data(text):
-    """Estrae Giocatore, Linea e Quota dal testo OCR"""
     player_match = re.search(r'([A-Z][a-z]+\s[A-Z][a-z]+)', text)
     line_match = re.search(r'(\d+\.?\d*)', text)
     odds_match = re.search(r'(\d+\.\d{2})', text)
@@ -34,12 +33,11 @@ def parse_betting_data(text):
     )
 
 def generate_maya_report(player, line, odds):
-    """Genera il report MAYA v5.1"""
     try:
         prob_model = 0.58
         prob_book = 1 / float(odds) if odds != "N/A" else 0
         ev = (prob_model * (float(odds) - 1)) - (1 - prob_model) if odds != "N/A" else 0
-        verdict = "🟢 BET" if ev > 0.05 else (" LEAN" if ev > 0 else "🔴 PASS")
+        verdict = "🟢 BET" if ev > 0.05 else ("🟡 LEAN" if ev > 0 else "🔴 PASS")
         
         return f"""
 🧠 *MAYA FRAMEWORK v5.1*
@@ -61,9 +59,9 @@ def generate_maya_report(player, line, odds):
 • Quota Equa: {1/prob_model:.2f}
 • *EV:* {ev:.2%}
 
-🎯 *VERDETTO:* {verdict}
+ *VERDETTO:* {verdict}
 
-💡 _Controlla injury report pre-partita._
+ _Controlla injury report pre-partita._
         """
     except Exception as e:
         return f"❌ Errore nel calcolo: {str(e)}"
@@ -74,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🏀 *Benvenuto nel MAYA Framework v5.1*\n\n"
         "📸 Inviami uno screenshot delle quote\n"
-        "️ Oppure: /analizza Nome Linea Quota",
+        "✍️ Oppure: /analizza Nome Linea Quota",
         parse_mode='Markdown'
     )
 
@@ -89,7 +87,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         report = generate_maya_report(player, line, odds)
         await update.message.reply_text(report, parse_mode='Markdown')
     except Exception as e:
-        await update.message.reply_text(f" Errore durante l'analisi: {str(e)}")
+        await update.message.reply_text(f"❌ Errore durante l'analisi: {str(e)}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -109,7 +107,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==================== SERVER HTTP (Per Render) ====================
 
 async def health_check(request):
-    return web.Response(text="MAYA Bot is running ")
+    return web.Response(text="MAYA Bot is running 🏀")
 
 async def run_server():
     app = web.Application()
@@ -126,7 +124,7 @@ async def run_server():
 
 async def run_bot():
     if not TOKEN:
-        logger.error("❌ TOKEN mancante! Controlla le variabili d'ambiente su Render.")
+        logger.error(" TOKEN mancante! Controlla le variabili d'ambiente su Render.")
         return
     
     app = Application.builder().token(TOKEN).build()
@@ -148,10 +146,9 @@ async def run_bot():
 
 async def main():
     logger.info("🚀 Avvio MAYA Bot...")
-    logger.info(f" TOKEN presente: {'SÌ' if TOKEN else 'NO'}")
+    logger.info(f"🔑 TOKEN presente: {'SÌ' if TOKEN else 'NO'}")
     logger.info(f"📡 PORT: {PORT}")
     
-    # Avvia bot e server in parallelo
     await asyncio.gather(
         run_bot(),
         run_server()
