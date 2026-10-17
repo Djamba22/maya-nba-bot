@@ -5,7 +5,7 @@ import pytesseract
 import re
 from PIL import Image
 import io
-import aiohttp
+from aiohttp import web
 from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
