@@ -1,16 +1,15 @@
 import os
-import asyncio  # ← QUESTO MANCAVA!
+import asyncio
 import logging
 import pytesseract
 import re
-import threading
 from PIL import Image
 import io
 from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# Configurazione
+# ==================== CONFIGURAZIONE ====================
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 PORT = int(os.environ.get("PORT", 10000))
 
@@ -23,6 +22,7 @@ logger = logging.getLogger(__name__)
 # ==================== LOGICA MAYA ====================
 
 def parse_betting_data(text):
+    """Estrae Giocatore, Linea e Quota dal testo OCR"""
     player_match = re.search(r'([A-Z][a-z]+\s[A-Z][a-z]+)', text)
     line_match = re.search(r'(\d+\.?\d*)', text)
     odds_match = re.search(r'(\d+\.\d{2})', text)
@@ -34,17 +34,18 @@ def parse_betting_data(text):
     )
 
 def generate_maya_report(player, line, odds):
+    """Genera il report MAYA v5.1"""
     try:
         prob_model = 0.58
         prob_book = 1 / float(odds) if odds != "N/A" else 0
         ev = (prob_model * (float(odds) - 1)) - (1 - prob_model) if odds != "N/A" else 0
-        verdict = "🟢 BET" if ev > 0.05 else ("🟡 LEAN" if ev > 0 else " PASS")
+        verdict = "🟢 BET" if ev > 0.05 else (" LEAN" if ev > 0 else "🔴 PASS")
         
         return f"""
- *MAYA FRAMEWORK v5.1*
+🧠 *MAYA FRAMEWORK v5.1*
 
 👤 *Giocatore:* {player}
-📊 *Linea:* {line} |  *Quota:* {odds}
+📊 *Linea:* {line} | 💰 *Quota:* {odds}
 
 ━━━━━━━━━━━━━━━━━━━━
 📈 *PLAYER PROFILE*
@@ -54,7 +55,7 @@ def generate_maya_report(player, line, odds):
 ⚔️ *MATCHUP*
 • Difficoltà: valutazione in corso
 
- *PROBABILITY ENGINE*
+📊 *PROBABILITY ENGINE*
 • Prob. Modello: {prob_model:.1%}
 • Prob. Book: {prob_book:.1%}
 • Quota Equa: {1/prob_model:.2f}
@@ -65,7 +66,7 @@ def generate_maya_report(player, line, odds):
 💡 _Controlla injury report pre-partita._
         """
     except Exception as e:
-        return f"❌ Errore: {str(e)}"
+        return f"❌ Errore nel calcolo: {str(e)}"
 
 # ==================== HANDLER TELEGRAM ====================
 
@@ -73,12 +74,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🏀 *Benvenuto nel MAYA Framework v5.1*\n\n"
         "📸 Inviami uno screenshot delle quote\n"
-        "✍️ Oppure: /analizza Nome Linea Quota",
+        "️ Oppure: /analizza Nome Linea Quota",
         parse_mode='Markdown'
     )
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Analisi in corso...")
+    await update.message.reply_text("🔍 Analisi in corso... Attendi 10 secondi.")
     try:
         photo = await update.message.photo[-1].get_file()
         photo_bytes = await photo.download_as_bytearray()
@@ -88,7 +89,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         report = generate_maya_report(player, line, odds)
         await update.message.reply_text(report, parse_mode='Markdown')
     except Exception as e:
-        await update.message.reply_text(f" Errore: {str(e)}")
+        await update.message.reply_text(f" Errore durante l'analisi: {str(e)}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
@@ -105,10 +106,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("👋 Inviami uno screenshot o usa /analizza")
 
-# ==================== SERVER HTTP ====================
+# ==================== SERVER HTTP (Per Render) ====================
 
 async def health_check(request):
-    return web.Response(text="MAYA Bot is running 🏀")
+    return web.Response(text="MAYA Bot is running ")
 
 async def run_server():
     app = web.Application()
@@ -123,9 +124,9 @@ async def run_server():
 
 # ==================== BOT TELEGRAM ====================
 
-def run_telegram_bot():
+async def run_bot():
     if not TOKEN:
-        logger.error("❌ TOKEN mancante!")
+        logger.error("❌ TOKEN mancante! Controlla le variabili d'ambiente su Render.")
         return
     
     app = Application.builder().token(TOKEN).build()
@@ -135,31 +136,31 @@ def run_telegram_bot():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     
     logger.info("✅ Bot handlers configurati, avvio polling...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    logger.info("🤖 Bot Telegram avviato con successo")
     
-    # Crea event loop per questo thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(app.run_polling(allowed_updates=Update.ALL_TYPES))
-    finally:
-        loop.close()
+    while True:
+        await asyncio.sleep(3600)
 
 # ==================== ENTRY POINT ====================
 
-if __name__ == '__main__':
-    logger.info(" Avvio MAYA Bot...")
-    logger.info(f"🔑 TOKEN presente: {'SÌ' if TOKEN else 'NO'}")
+async def main():
+    logger.info("🚀 Avvio MAYA Bot...")
+    logger.info(f" TOKEN presente: {'SÌ' if TOKEN else 'NO'}")
     logger.info(f"📡 PORT: {PORT}")
     
-    # Avvia il bot in un thread separato
-    bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
-    bot_thread.start()
-    logger.info("🤖 Avvio thread Telegram bot...")
-    
-    # Avvia il server HTTP nel thread principale
-    logger.info(f"🌐 Avvio server aiohttp su porta {PORT}...")
-    
-    # Crea event loop per il server
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(run_server())
+    # Avvia bot e server in parallelo
+    await asyncio.gather(
+        run_bot(),
+        run_server()
+    )
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot fermato manualmente")
+    except Exception as e:
+        logger.error(f"Errore fatale: {e}")
