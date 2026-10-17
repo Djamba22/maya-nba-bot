@@ -9,11 +9,12 @@ from aiohttp import web
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes, CommandHandler
 
-# Il TOKEN viene letto dalle variabili d'ambiente di Render
+# Configurazione
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-PORT = int(os.environ.get("PORT", 8080))
+PORT = int(os.environ.get("PORT", 10000))
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def parse_betting_data(text):
     """Estrae Giocatore, Linea e Quota dal testo OCR"""
@@ -29,26 +30,27 @@ def parse_betting_data(text):
 
 def generate_maya_report(player, line, odds):
     """Genera il report MAYA v5.1"""
-    prob_model = 0.58
-    prob_book = 1 / float(odds) if odds != "N/A" else 0
-    ev = (prob_model * (float(odds) - 1)) - (1 - prob_model) if odds != "N/A" else 0
-    
-    verdict = "🟢 BET" if ev > 0.05 else (" LEAN" if ev > 0 else "🔴 PASS")
-    
-    report = f"""
-🧠 *MAYA FRAMEWORK v5.1 - ANALISI COMPLETA*
+    try:
+        prob_model = 0.58
+        prob_book = 1 / float(odds) if odds != "N/A" else 0
+        ev = (prob_model * (float(odds) - 1)) - (1 - prob_model) if odds != "N/A" else 0
+        
+        verdict = "🟢 BET" if ev > 0.05 else ("🟡 LEAN" if ev > 0 else "🔴 PASS")
+        
+        report = f"""
+ *MAYA FRAMEWORK v5.1 - ANALISI COMPLETA*
 
 👤 *Giocatore:* {player}
 📊 *Linea:* {line} | 💰 *Quota:* {odds}
 
 ━━━━━━━━━━━━━━━━━━━━
- *PLAYER PROFILE & TREND*
+📈 *PLAYER PROFILE & TREND*
 • Media stagionale: dati Sofascore recuperati
 • Trend ultime 5 partite: in analisi
 • Usage% e Minuti: verificati
 
 ━━━━━━━━━━━━━━━━━━━━
-️ *MATCHUP & CONTEXT*
+⚔️ *MATCHUP & CONTEXT*
 • Difficoltà matchup: valutazione in corso
 • Contesto (B2B, viaggi, infortuni): verificato
 
@@ -63,11 +65,14 @@ def generate_maya_report(player, line, odds):
 🎯 *VERDETTO FINALE:* {verdict}
 
 💡 _Controlla injury report 30 min prima del tip-off._
-    """
-    return report
+        """
+        return report
+    except Exception as e:
+        return f"❌ Errore nel calcolo: {str(e)}"
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Analisi in corso... Attendi 10 secondi.")
+    """Gestisce le foto inviate dall'utente"""
+    await update.message.reply_text(" Analisi in corso... Attendi 10 secondi.")
     
     try:
         photo = await update.message.photo[-1].get_file()
@@ -81,9 +86,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(report, parse_mode='Markdown')
         
     except Exception as e:
-        await update.message.reply_text(f"❌ Errore: {str(e)}")
+        await update.message.reply_text(f"❌ Errore durante l'analisi: {str(e)}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce i messaggi testuali"""
     text = update.message.text
     
     if text.startswith("/analizza"):
@@ -97,57 +103,4 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text("❗ Formato: /analizza Nome Linea Quota")
     else:
-        await update.message.reply_text("👋 Inviami uno screenshot o usa /analizza")
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        " *Benvenuto nel MAYA Framework v5.1*\n\n"
-        "📸 Inviami uno screenshot delle quote\n"
-        "✍️ Oppure: /analizza Nome Linea Quota",
-        parse_mode='Markdown'
-    )
-
-# Server HTTP fittizio per Render
-async def health_check(request):
-    return web.Response(text="MAYA Bot is running 🏀")
-
-def init_web_app():
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    return app
-
-async def run_bot_and_server():
-    """Avvia sia il bot Telegram che il server HTTP"""
-    if not TOKEN:
-        print("❌ ERRORE: TELEGRAM_BOT_TOKEN non configurato!")
-        return
-    
-    # Inizializza il bot
-    bot_app = Application.builder().token(TOKEN).build()
-    bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(CommandHandler("analizza", handle_text))
-    bot_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    
-    # Avvia il bot e il polling
-    await bot_app.initialize()
-    await bot_app.start()
-    await bot_app.updater.start_polling()
-    
-    # Avvia il server HTTP
-    web_app = init_web_app()
-    runner = web.AppRunner(web_app)
-    await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', PORT)
-    await site.start()
-    
-    print(f"🤖 Bot MAYA in ascolto... Server HTTP su porta {PORT}")
-    
-    # Mantieni entrambi attivi
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    finally:
-        await bot_app.updater.stop()
-        await bot_app.stop()
-        await bot_app.shutdown()
+        await update
