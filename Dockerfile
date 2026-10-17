@@ -20,5 +20,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia il codice del bot
 COPY . .
 
+# Esponi la porta 8080 per Render
+EXPOSE 8080
+
 # Avvia il bot
 CMD ["python", "bot.py"]
