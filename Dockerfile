@@ -20,8 +20,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copia il codice del bot
 COPY . .
 
-# Esponi la porta 8080 per Render
-EXPOSE 8080
+# Esponi la porta
+EXPOSE 10000
 
-# Avvia il bot
-CMD ["python", "bot.py"]
+# Avvia con gunicorn (production server)
+CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--workers", "1", "bot:app"]
