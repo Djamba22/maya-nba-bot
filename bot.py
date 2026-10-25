@@ -22,90 +22,54 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ==================== SYSTEM PROMPT MAYA v5.1 ====================
-MAYA_PROMPT = """
-Sei MAYA (Market Analysis & Yield Assessment), un analista quantitativo professionista specializzato in Player Props NBA.
+# ==================== SYSTEM PROMPT MAYA v5.1 (RIGOROSO) ====================
+MAYA_SYSTEM_PROMPT = """
+Sei MAYA (Market Analysis & Yield Assessment), un analista quantitativo professionista specializzato in Player Props NBA (specificamente Mercato Triple).
 
 IL TUO OBIETTIVO:
-Stimare la probabilità reale che una player prop si verifichi e confrontarla con la probabilità implicita nella quota del bookmaker per individuare ESCLUSIVAMENTE situazioni con Expected Value (EV) positivo.
+Stimare la probabilità reale che un giocatore faccia Over 2 o Over 3 triple e confrontarla con la quota del bookmaker per individuare ESCLUSIVAMENTE Expected Value (EV) positivo.
 
-REGOLE FONDAMENTALI:
-- Non cercare di prevedere il risultato della partita
-- Non cercare obbligatoriamente una scommessa
-- Ricerca SOLO valore (EV positivo)
-- Ogni dato modifica la probabilità, quasi nessun dato la determina da solo
-- Non contare mai due volte la stessa informazione
-- Non forzare mai una giocata
-- Non utilizzare la fama del giocatore come criterio decisionale
+REGOLE FONDAMENTALI (DA RISPETTARE SEMPRE):
+1. Non prevedere il risultato della partita. Cerca SOLO valore matematico.
+2. Non usare la fama del giocatore. Usa solo dati, volume e contesto.
+3. Ogni dato modifica la probabilità, quasi nessun dato la determina da solo.
+4. Non contare mai due volte la stessa informazione.
+5. Non forzare mai una giocata. Se non c'è valore, il verdetto è PASS.
 
-PROTOCOLLO DI ANALISI (segui SEMPRE questo ordine):
+PROTOCOLLO DI ANALISI (Segui questo ordine mentale):
+1. SMART SCREENER: Quota < 1.40 = PASS automatico (nessun valore).
+2. PLAYER PROFILE & VOLUME: Quanti tiri da 3 fa a partita? (3PA). È un tiratore puro o di volume?
+3. TREND ENGINE: Come ha tirato nelle ultime 5 partite? (Hot/Cold streak).
+4. MATCHUP & CONTEXT: La difesa avversaria concede molte triple? C'è back-to-back? Infortuni ai playmaker che aumentano il suo volume?
+5. NEWS: Ci sono notizie di infortunio, dubbio o rest? (Se sì, penalizza pesantemente).
 
-1. SMART SCREENER (Hard Stop):
-   - Quota < 2.00 → PASS
-   - Giocatore OUT/DNP → PASS
-   - Limitazione minuti severa → PASS
+FORMATO OUTPUT (Rispondi SEMPRE in Italiano, usando questo schema esatto):
 
-2. PLAYER PROFILE:
-   - Ruolo offensivo
-   - Modalità di generazione tiri
-   - Stabilità di ruolo, minuti, volume
+🧠 *ANALISI MAYA v5.1*
+ *Giocatore:* [Nome]
+ *Mercato:* [Over 2 o Over 3 Triple]
+💰 *Quota:* [Quota]
 
-3. TREND ENGINE:
-   - Confronta stagione vs ultime 20/10/5/3 partite
-   - Determina se il trend è strutturale o varianza
-   - Non premiare automaticamente Hot Streak
-   - Non penalizzare automaticamente Cold Streak
+📊 *DATI CHIAVE:*
+• Volume 3PA: [Stima tiri a partita]
+• Trend recente: [Analisi ultime partite]
+• Matchup: [Analisi difesa avversaria]
 
-4. VOLUME & SHOOTING ENGINE:
-   - 3PA medi, Attempts per Minute, Attempts per 36
-   - Mediana e deviazione standard
-   - Catch & Shoot, Pull-Up, Wide Open%
+📰 *NEWS & CONTEXT:*
+[Inserisci qui le news trovate o "Nessuna news critica"]
 
-5. MATCHUP & CONTEXT:
-   - Defensive Rating avversario
-   - Pace
-   - 3PA/3PM concessi
-   - Back-to-back, viaggi, riposo
-   - Infortuni, rientri, rotazioni
+📈 *VALUTAZIONE MAYA:*
+• Probabilità Reale Stimata: [X]%
+• Probabilità Implicita (Book): [Y]%
+• Expected Value (EV): [Z]%
 
-6. MARKET ENGINE:
-   - Line movement
-   - Quota apertura vs attuale
-   - Interpretare cause (notizie/denaro/inefficienze)
+🎯 *VERDETTO FINALE:* [🟢 BET / 🟡 LEAN / 🔴 PASS]
+ *Motivo:* [Spiegazione sintetica e tecnica del perché]
 
-7. MAYA VALUE INDEX (MVI 0-100):
-   Integra 4 pilastri:
-   - Player Quality
-   - Game Quality
-   - Market Quality
-   - Model Reliability
-
-8. PROBABILITY ENGINE:
-   - Probabilità modello
-   - Quota equa
-   - Probabilità implicita bookmaker
-   - Expected Value (EV)
-
-9. DECISION ENGINE:
-   🟢 BET: EV chiaramente positivo, MVI elevato, affidabilità adeguata
-   🟡 LEAN: Possibile valore ma incertezza significativa
-   🔴 PASS: EV insufficiente o affidabilità troppo bassa
-
-FORMATO OUTPUT (RIGOROSO):
-Restituisci SEMPRE una tabella Markdown con queste colonne:
-| Giocatore | Linea | Quota | Player Quality | Game Quality | Market Quality | Model Reliability | MVI | Prob Modello | Prob Book | Quota Equa | EV | Stake | Verdetto |
-
-Poi un commento tecnico sintetico con:
-- Motivo principale della valutazione
-- Principale punto di forza
-- Principale rischio
-- Dati mancanti
-- Controlli pre tip-off
-
-RICORDA: Il tuo compito non è indovinare il risultato. Il tuo compito è prendere decisioni migliori del mercato con metodo, disciplina e coerenza.
+IMPORTANTE: Non usare asterischi doppi (**) o underscore (_) per il grassetto/corsivo perché rompono Telegram. Usa solo il testo normale e le emoji.
 """
 
-# ==================== DATA AGGREGATOR ====================
+# ==================== DATA AGGREGATOR (NEWS) ====================
 class DataAggregator:
     def __init__(self, player_name):
         self.player_name = player_name
@@ -113,10 +77,10 @@ class DataAggregator:
     
     async def fetch_telegram_news(self):
         channels = ["https://t.me/s/nbanews24italia", "https://t.me/s/InfoBasketNBA"]
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         
-        spam_keywords = ['fantabasket', 'lega', 'registrati', 'codice', 'dunk', 'promo', 'vota', 'sondaggio', 'buona fortuna']
-        relevant_keywords = ['out', 'dubbio', 'infortunio', 'riposo', 'rest', 'non giocherà', 'titolare', 'starter', 'probable', 'questionable']
+        spam_keywords = ['fantabasket', 'lega', 'registrati', 'codice', 'dunk', 'promo', 'vota', 'sondaggio', 'buona fortuna', 'link', 'clicca']
+        relevant_keywords = ['out', 'dubbio', 'infortunio', 'riposo', 'rest', 'non giocherà', 'titolare', 'starter', 'probable', 'questionable', 'minuti', 'limitazione']
         
         async with aiohttp.ClientSession() as session:
             for url in channels:
@@ -124,118 +88,166 @@ class DataAggregator:
                     async with session.get(url, headers=headers, timeout=5) as resp:
                         html = await resp.text()
                     soup = BeautifulSoup(html, 'html.parser')
-                    for msg in soup.find_all('div', class_='tgme_widget_message_text')[:15]:
+                    for msg in soup.find_all('div', class_='tgme_widget_message_text')[:20]:
                         text = msg.get_text(separator=' ', strip=True)
                         if any(s in text.lower() for s in spam_keywords): continue
-                        if self.player_name.lower().split()[0] in text.lower() or self.player_name.lower().split()[-1] in text.lower():
-                            if any(kw in text.lower() for kw in relevant_keywords):
-                                self.news.append(text[:150])
-                except: pass
+                        
+                        # Cerca il nome del giocatore nel messaggio
+                        name_parts = self.player_name.lower().split()
+                        if len(name_parts) >= 2:
+                            if name_parts[0] in text.lower() or name_parts[-1] in text.lower():
+                                # Se il messaggio contiene parole chiave rilevanti
+                                if any(kw in text.lower() for kw in relevant_keywords):
+                                    self.news.append(text[:150])
+                except Exception as e:
+                    pass # Silenzia errori di rete per non bloccare il bot
 
-# ==================== OCR ENGINE ====================
-def parse_betting_data(text):
+# ==================== OCR ENGINE (PARSER TABELLE BET365) ====================
+def parse_betting_table(text):
+    """
+    Legge tabelle strutturate come:
+    Nome Giocatore | Quota Colonna 1 (Over 2) | Quota Colonna 2 (Over 3)
+    Es: Luka Doncic 1.09 1.33
+    """
     players = []
     lines = text.split('\n')
+    
+    # Pattern: Nome (2+ parole maiuscole/minuscole) seguito da due numeri decimali
     pattern = re.compile(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+(\d+\.\d{2})\s+(\d+\.\d{2})')
     
     for line in lines:
         match = pattern.search(line.strip())
         if match:
-            players.append({'name': match.group(1), 'line': match.group(2), 'odds': match.group(3)})
+            name = match.group(1)
+            odds_col2 = match.group(2) # Over 2 Triple
+            odds_col3 = match.group(3) # Over 3 Triple
             
-    if not players:
-        for line in lines:
-            name = re.search(r'([A-Z][a-z]+ [A-Z][a-z]+)', line)
-            odds = re.findall(r'(\d+\.\d{2})', line)
-            if name and len(odds) >= 2:
-                players.append({'name': name.group(1), 'line': odds[0], 'odds': odds[1]})
-                
-    return players if players else [{'name': 'Non riconosciuto', 'line': 'N/A', 'odds': 'N/A'}]
+            # Aggiungiamo entrambe le opzioni per lo stesso giocatore
+            players.append({'name': name, 'market': 'Over 2 Triple', 'odds': odds_col2})
+            players.append({'name': name, 'market': 'Over 3 Triple', 'odds': odds_col3})
+            
+    # Rimuovi duplicati se l'OCR legge male
+    unique_players = []
+    seen = set()
+    for p in players:
+        key = (p['name'], p['market'])
+        if key not in seen:
+            seen.add(key)
+            unique_players.append(p)
+            
+    return unique_players
 
-# ==================== AI ANALYSIS ====================
+# ==================== AI ANALYSIS ENGINE ====================
 async def analyze_with_ai(player):
-    if not groq_client: return "⚠️ Groq API non configurata. Aggiungi GROQ_API_KEY a Render."
+    if not groq_client:
+        return "⚠️ Groq AI non configurata. Contatta l'admin."
     
-    news_text = "\n- ".join(player.get('news', [])) if player.get('news') else "Nessuna notizia critica trovata."
+    news_text = "\n- ".join(player.get('news', [])) if player.get('news') else "Nessuna news critica trovata sui canali monitorati."
     
     prompt = f"""
-Analizza questa prop NBA seguendo il protocollo MAYA v5.1:
+Analizza questa prop NBA seguendo rigorosamente il protocollo MAYA v5.1:
 
 GIOCATORE: {player['name']}
-LINEA: {player['line']}
-QUOTA: {player['odds']}
+MERCATO: {player['market']}
+QUOTA BOOKMAKER: {player['odds']}
 
-NEWS RECENTI:
+NEWS E CONTESTO RECENTE:
 - {news_text}
 
-Contesto: NBA Regular Season 2026-27
-
-Fornisci l'analisi completa con tabella e verdetto finale.
+Applica il tuo ragionamento quantitativo e restituisci il report formattato.
 """
     try:
         response = groq_client.chat.completions.create(
-            model="llama-3.1-70b-versatile",
-            messages=[{"role": "system", "content": MAYA_PROMPT}, {"role": "user", "content": prompt}],
-            temperature=0.3, max_tokens=2000
+            model="llama-3.1-70b-versatile", # Modello potente e gratuito
+            messages=[
+                {"role": "system", "content": MAYA_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2, # Basso per analisi deterministiche
+            max_tokens=1200
         )
         return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Errore Groq: {e}")
         return f"❌ Errore AI: {str(e)}"
 
-# ==================== HANDLERS ====================
+# ==================== HANDLERS TELEGRAM ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    status = "✅ ATTIVA (Groq AI)" if groq_client else "❌ NON CONFIGURATA"
+    status = "✅ ATTIVA (Groq AI - Llama 3.1 70B)" if groq_client else "❌ NON CONFIGURATA"
     await update.message.reply_text(
-        f"🏀 *MAYA Framework v5.1 - AI Powered*\n\n"
-        f"🤖 *AI Status:* {status}\n\n"
-        f" Invia screenshot delle quote Bet365\n"
-        f"🧠 L'AI analizzerà con il protocollo MAYA v5.1\n"
-        f"📰 News da @nbanews24italia + @InfoBasketNBA",
-        parse_mode='Markdown'
+        f"🏀 MAYA Framework v5.1 - AI Analyzer\n\n"
+        f" Stato AI: {status}\n\n"
+        f"📸 Come usare il bot:\n"
+        f"1. Fai uno screenshot della tabella quote (Bet365 o simili).\n"
+        f"2. Il bot leggerà TUTTI i giocatori e le colonne (Over 2 e Over 3 triple).\n"
+        f"3. L'AI applicherà il protocollo MAYA v5.1 per trovare le value bet.\n\n"
+        f"📰 Fonti News: @nbanews24italia + @InfoBasketNBA"
     )
 
+async def safe_send_message(update, text):
+    """Invia messaggio gestendo errori di formattazione Telegram"""
+    try:
+        await update.message.reply_text(text, parse_mode='Markdown')
+    except Exception:
+        try:
+            # Fallback: rimuove caratteri problematici e invia testo puro
+            clean_text = text.replace('*', '').replace('_', '').replace('`', '')
+            await update.message.reply_text(clean_text)
+        except Exception:
+            await update.message.reply_text("Messaggio ricevuto ma formattazione complessa.")
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🧠 Analisi AI in corso... Attendi 15-30 secondi.")
+    await update.message.reply_text(" Lettura tabella in corso... Attendi 20-40 secondi.")
+    
     try:
         photo = await update.message.photo[-1].get_file()
         photo_bytes = await photo.download_as_bytearray()
         image = Image.open(io.BytesIO(photo_bytes))
+        
+        # OCR
         text = pytesseract.image_to_string(image, lang='ita+eng')
+        players = parse_betting_table(text)
         
-        players = parse_betting_data(text)
-        await update.message.reply_text(f"📊 Rilevati {len(players)} giocatori. Analisi in corso...")
+        if not players:
+            await update.message.reply_text("❌ Non ho trovato giocatori con quote nella tabella. Assicurati che lo screenshot sia nitido e mostri i nomi completi.")
+            return
         
-        for p in players[:3]:
+        await update.message.reply_text(f"📊 Trovati {len(players)} mercati. Analisi AI MAYA in corso...")
+        
+        # Analizza i primi 6 mercati per non saturare l'AI e rispettare i limiti
+        # (Puoi aumentare a 10 se vuoi, ma richiede più tempo)
+        for p in players[:6]:
             aggregator = DataAggregator(p['name'])
             await aggregator.fetch_telegram_news()
             p['news'] = aggregator.news
             
-            report = await analyze_with_ai(p)
-            await update.message.reply_text(report, parse_mode='Markdown')
+            analysis = await analyze_with_ai(p)
+            await safe_send_message(update, analysis)
+            await asyncio.sleep(1) # Pausa per non floodare Telegram
             
     except Exception as e:
-        await update.message.reply_text(f"❌ Errore: {str(e)}")
+        await update.message.reply_text(f"❌ Errore sistema: {str(e)}")
+        logger.error(f"Errore handle_photo: {e}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text.startswith("/analizza"):
         parts = update.message.text.split()
         if len(parts) >= 4:
-            player = {'name': " ".join(parts[1:-2]), 'line': parts[-2], 'odds': parts[-1]}
+            player = {'name': " ".join(parts[1:-2]), 'market': 'Custom', 'odds': parts[-1]}
             await update.message.reply_text(f"🧠 Analisi AI di {player['name']} in corso...")
             aggregator = DataAggregator(player['name'])
             await aggregator.fetch_telegram_news()
             player['news'] = aggregator.news
             report = await analyze_with_ai(player)
-            await update.message.reply_text(report, parse_mode='Markdown')
+            await safe_send_message(update, report)
         else:
-            await update.message.reply_text("❗ Formato: /analizza Nome Linea Quota")
+            await update.message.reply_text("❗ Formato: /analizza Nome Giocatore Quota")
     else:
-        await update.message.reply_text("👋 Invia uno screenshot o usa /analizza")
+        await update.message.reply_text(" Invia uno screenshot di una tabella quote.")
 
-# ==================== SERVER & BOT ====================
+# ==================== SERVER HTTP & BOT (ASYNCIO PURO) ====================
 async def health_check(request):
-    return web.Response(text="MAYA AI Bot is running ")
+    return web.Response(text="MAYA AI Bot v5.1 is running 🏀")
 
 async def run_server():
     app = web.Application()
@@ -244,10 +256,14 @@ async def run_server():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', PORT)
     await site.start()
-    logger.info(f"🌐 Server HTTP su porta {PORT}")
+    logger.info(f"🌐 Server HTTP attivo su porta {PORT}")
     while True: await asyncio.sleep(3600)
 
 async def run_bot():
+    if not TOKEN:
+        logger.error("❌ TOKEN Telegram mancante!")
+        return
+    
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("analizza", handle_text))
@@ -257,14 +273,20 @@ async def run_bot():
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
-    logger.info("🤖 Bot Telegram attivo")
+    logger.info("🤖 Bot Telegram attivo con polling")
     while True: await asyncio.sleep(3600)
 
 async def main():
-    logger.info("🚀 Avvio MAYA AI Bot...")
+    logger.info("🚀 Avvio MAYA AI Bot v5.1...")
     logger.info(f"🔑 Telegram: {'OK' if TOKEN else 'MANCANTE'}")
-    logger.info(f" Groq AI: {'OK' if groq_client else 'NON CONFIGURATA'}")
+    logger.info(f"🤖 Groq AI: {'OK' if groq_client else 'NON CONFIGURATA'}")
+    # Avvia bot e server in parallelo
     await asyncio.gather(run_bot(), run_server())
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot fermato manualmente")
+    except Exception as e:
+        logger.error(f"Errore fatale: {e}")
