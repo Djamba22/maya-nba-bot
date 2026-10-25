@@ -16,4 +16,5 @@ COPY . .
 
 EXPOSE 10000
 
+# Questo comando dice a Render di eseguire Python direttamente, niente Gunicorn
 CMD ["python", "bot.py"]
