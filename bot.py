@@ -3,7 +3,6 @@ import asyncio
 import logging
 import pytesseract
 import re
-import json
 from PIL import Image
 import io
 from aiohttp import web
@@ -25,29 +24,85 @@ logger = logging.getLogger(__name__)
 
 # ==================== SYSTEM PROMPT MAYA v5.1 ====================
 MAYA_PROMPT = """
-Sei MAYA, un analista quantitativo NBA. Il tuo obiettivo è trovare Expected Value (EV) positivo nelle Player Props.
-REGOLE:
-1. Non prevedere il risultato, cerca solo VALORE (EV > 0).
-2. Non usare la fama del giocatore.
-3. Valuta: Volume, Trend, Matchup, Context (infortuni/riposo).
-4. Se ci sono notizie di infortunio/dubbio/riposo, penalizza pesantemente la probabilità.
+Sei MAYA (Market Analysis & Yield Assessment), un analista quantitativo professionista specializzato in Player Props NBA.
 
-FORMATO RISPOSTA (in Italiano):
-🧠 *MAYA AI ANALYSIS*
-👤 *Giocatore:* [Nome]
-📊 *Linea:* [Linea] | 💰 *Quota:* [Quota]
+IL TUO OBIETTIVO:
+Stimare la probabilità reale che una player prop si verifichi e confrontarla con la probabilità implicita nella quota del bookmaker per individuare ESCLUSIVAMENTE situazioni con Expected Value (EV) positivo.
 
-📰 *NEWS & CONTEXT:*
-[Analisi delle news trovate o "Nessuna news critica"]
+REGOLE FONDAMENTALI:
+- Non cercare di prevedere il risultato della partita
+- Non cercare obbligatoriamente una scommessa
+- Ricerca SOLO valore (EV positivo)
+- Ogni dato modifica la probabilità, quasi nessun dato la determina da solo
+- Non contare mai due volte la stessa informazione
+- Non forzare mai una giocata
+- Non utilizzare la fama del giocatore come criterio decisionale
 
-📊 *PROBABILITY ENGINE:*
-• Prob. Modello (AI): [X]%
-• Prob. Bookmaker: [Y]%
-• Quota Equa: [Z]
-• *Expected Value (EV):* [W]%
+PROTOCOLLO DI ANALISI (segui SEMPRE questo ordine):
 
-🎯 *VERDETTO:* [🟢 BET / 🟡 LEAN / 🔴 PASS]
-💡 *Motivo:* [Spiegazione sintetica del ragionamento AI]
+1. SMART SCREENER (Hard Stop):
+   - Quota < 2.00 → PASS
+   - Giocatore OUT/DNP → PASS
+   - Limitazione minuti severa → PASS
+
+2. PLAYER PROFILE:
+   - Ruolo offensivo
+   - Modalità di generazione tiri
+   - Stabilità di ruolo, minuti, volume
+
+3. TREND ENGINE:
+   - Confronta stagione vs ultime 20/10/5/3 partite
+   - Determina se il trend è strutturale o varianza
+   - Non premiare automaticamente Hot Streak
+   - Non penalizzare automaticamente Cold Streak
+
+4. VOLUME & SHOOTING ENGINE:
+   - 3PA medi, Attempts per Minute, Attempts per 36
+   - Mediana e deviazione standard
+   - Catch & Shoot, Pull-Up, Wide Open%
+
+5. MATCHUP & CONTEXT:
+   - Defensive Rating avversario
+   - Pace
+   - 3PA/3PM concessi
+   - Back-to-back, viaggi, riposo
+   - Infortuni, rientri, rotazioni
+
+6. MARKET ENGINE:
+   - Line movement
+   - Quota apertura vs attuale
+   - Interpretare cause (notizie/denaro/inefficienze)
+
+7. MAYA VALUE INDEX (MVI 0-100):
+   Integra 4 pilastri:
+   - Player Quality
+   - Game Quality
+   - Market Quality
+   - Model Reliability
+
+8. PROBABILITY ENGINE:
+   - Probabilità modello
+   - Quota equa
+   - Probabilità implicita bookmaker
+   - Expected Value (EV)
+
+9. DECISION ENGINE:
+   🟢 BET: EV chiaramente positivo, MVI elevato, affidabilità adeguata
+   🟡 LEAN: Possibile valore ma incertezza significativa
+   🔴 PASS: EV insufficiente o affidabilità troppo bassa
+
+FORMATO OUTPUT (RIGOROSO):
+Restituisci SEMPRE una tabella Markdown con queste colonne:
+| Giocatore | Linea | Quota | Player Quality | Game Quality | Market Quality | Model Reliability | MVI | Prob Modello | Prob Book | Quota Equa | EV | Stake | Verdetto |
+
+Poi un commento tecnico sintetico con:
+- Motivo principale della valutazione
+- Principale punto di forza
+- Principale rischio
+- Dati mancanti
+- Controlli pre tip-off
+
+RICORDA: Il tuo compito non è indovinare il risultato. Il tuo compito è prendere decisioni migliori del mercato con metodo, disciplina e coerenza.
 """
 
 # ==================== DATA AGGREGATOR ====================
@@ -61,6 +116,7 @@ class DataAggregator:
         headers = {'User-Agent': 'Mozilla/5.0'}
         
         spam_keywords = ['fantabasket', 'lega', 'registrati', 'codice', 'dunk', 'promo', 'vota', 'sondaggio', 'buona fortuna']
+        relevant_keywords = ['out', 'dubbio', 'infortunio', 'riposo', 'rest', 'non giocherà', 'titolare', 'starter', 'probable', 'questionable']
         
         async with aiohttp.ClientSession() as session:
             for url in channels:
@@ -72,7 +128,8 @@ class DataAggregator:
                         text = msg.get_text(separator=' ', strip=True)
                         if any(s in text.lower() for s in spam_keywords): continue
                         if self.player_name.lower().split()[0] in text.lower() or self.player_name.lower().split()[-1] in text.lower():
-                            self.news.append(text[:150])
+                            if any(kw in text.lower() for kw in relevant_keywords):
+                                self.news.append(text[:150])
                 except: pass
 
 # ==================== OCR ENGINE ====================
@@ -97,31 +154,34 @@ def parse_betting_data(text):
 
 # ==================== AI ANALYSIS ====================
 async def analyze_with_ai(player):
-    if not groq_client: return "⚠️ Groq API non configurata."
+    if not groq_client: return "⚠️ Groq API non configurata. Aggiungi GROQ_API_KEY a Render."
     
-    news_text = "\n- ".join(player.get('news', [])) if player.get('news') else "Nessuna notizia critica trovata sui canali monitorati."
+    news_text = "\n- ".join(player.get('news', [])) if player.get('news') else "Nessuna notizia critica trovata."
     
     prompt = f"""
-Analizza questa prop NBA:
-Giocatore: {player['name']}
-Linea: {player['line']}
-Quota: {player['odds']}
+Analizza questa prop NBA seguendo il protocollo MAYA v5.1:
 
-News recenti:
+GIOCATORE: {player['name']}
+LINEA: {player['line']}
+QUOTA: {player['odds']}
+
+NEWS RECENTI:
 - {news_text}
 
-Applica il protocollo MAYA v5.1 e restituisci il report formattato.
+Contesto: NBA Regular Season 2026-27
+
+Fornisci l'analisi completa con tabella e verdetto finale.
 """
     try:
         response = groq_client.chat.completions.create(
             model="llama-3.1-70b-versatile",
             messages=[{"role": "system", "content": MAYA_PROMPT}, {"role": "user", "content": prompt}],
-            temperature=0.2, max_tokens=1000
+            temperature=0.3, max_tokens=2000
         )
         return response.choices[0].message.content
     except Exception as e:
         logger.error(f"Errore Groq: {e}")
-        return "❌ Errore nell'analisi AI. Riprova tra un minuto."
+        return f"❌ Errore AI: {str(e)}"
 
 # ==================== HANDLERS ====================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,8 +189,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"🏀 *MAYA Framework v5.1 - AI Powered*\n\n"
         f"🤖 *AI Status:* {status}\n\n"
-        f"📸 Invia screenshot di quote Bet365.\n"
-        f"Il bot analizzerà con AI e ti darà il verdetto MAYA.",
+        f" Invia screenshot delle quote Bet365\n"
+        f"🧠 L'AI analizzerà con il protocollo MAYA v5.1\n"
+        f"📰 News da @nbanews24italia + @InfoBasketNBA",
         parse_mode='Markdown'
     )
 
@@ -161,7 +222,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parts = update.message.text.split()
         if len(parts) >= 4:
             player = {'name': " ".join(parts[1:-2]), 'line': parts[-2], 'odds': parts[-1]}
-            await update.message.reply_text("🧠 Analisi AI in corso...")
+            await update.message.reply_text(f"🧠 Analisi AI di {player['name']} in corso...")
             aggregator = DataAggregator(player['name'])
             await aggregator.fetch_telegram_news()
             player['news'] = aggregator.news
@@ -200,7 +261,9 @@ async def run_bot():
     while True: await asyncio.sleep(3600)
 
 async def main():
-    logger.info(" Avvio MAYA AI Bot...")
+    logger.info("🚀 Avvio MAYA AI Bot...")
+    logger.info(f"🔑 Telegram: {'OK' if TOKEN else 'MANCANTE'}")
+    logger.info(f" Groq AI: {'OK' if groq_client else 'NON CONFIGURATA'}")
     await asyncio.gather(run_bot(), run_server())
 
 if __name__ == '__main__':
